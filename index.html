@@ -122,9 +122,9 @@
                     </div>
 
                     <div id="adminControls" class="hidden">
-                        <button onclick="syncAndClearMaster()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-4 py-2 rounded-lg text-xs shadow transition flex items-center space-x-2">
+                        <button id="adminSyncBtn" onclick="syncAndClearMaster()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-4 py-2 rounded-lg text-xs shadow transition flex items-center space-x-2">
                             <i class="fa-solid fa-file-export"></i>
-                            <span>Sync & Clear to Master (CSV)</span>
+                            <span>Sync & Clear to Master Data</span>
                         </button>
                     </div>
                 </div>
@@ -248,7 +248,7 @@
             }
         }
 
-        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE (Adjusted for 6-column Excel schema without SyncStatus) ---
+        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE ---
         async function fetchStagingFromOneDrive() {
             try {
                 const token = await getAccessToken();
@@ -261,21 +261,13 @@
                 if (data.value) {
                     data.value.forEach(row => {
                         const v = row.values[0];
-                        
-                        // Excel Table Column Order (SyncStatus Removed):
-                        // Index 0: VisitDate
-                        // Index 1: Customer
-                        // Index 2: Chargeable
-                        // Index 3: Product
-                        // Index 4: Qty
-                        // Index 5: MYOBUpdate (Blank)
-                        
                         stagingData.push({
                             visitDate: v[0] || "",
                             customer: v[1] || "",
                             chargeable: v[2] || "",
                             product: v[3] || "",
-                            qty: v[4] || 0
+                            qty: v[4] || 0,
+                            myob: v[5] || ""
                         });
                     });
                 }
@@ -298,18 +290,17 @@
             submitBtn.innerText = "Saving to OneDrive...";
 
             const rawVisitDate = document.getElementById("visitDate").value;
-            const formattedDate = formatDateDisplay(rawVisitDate); // Formats to DD/MM/YYYY
+            const formattedDate = formatDateDisplay(rawVisitDate);
             const customer = document.getElementById("customer").value;
             const chargeable = document.getElementById("chargeable").value;
 
-            // Inserts 6-column row: [VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
             const rowsToInsert = cartItems.map(item => [
-                formattedDate, // Index 0: VisitDate (DD/MM/YYYY)
+                formattedDate, // Index 0: VisitDate
                 customer,      // Index 1: Customer
                 chargeable,    // Index 2: Chargeable
                 item.product,  // Index 3: Product
                 item.qty,      // Index 4: Qty
-                ""             // Index 5: MYOBUpdate (Blank)
+                ""             // Index 5: MYOBUpdate
             ]);
 
             try {
@@ -434,27 +425,87 @@
             renderStagingTable();
         }
 
-        // --- 10. ADMIN EXPORT ---
-        function syncAndClearMaster() {
-            if (stagingData.length === 0) {
-                alert("No records to export.");
-                return;
+        // --- 10. ADMIN SYNC & TRANSFER TO MASTERAPP_DATA.XLSX ---
+        async function syncAndClearMaster() {
+            const btn = document.getElementById("adminSyncBtn");
+            try {
+                const token = await getAccessToken();
+                const headers = { 
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                };
+
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Transferring Data...</span>';
+
+                // Step 1: Read current rows from App_Data.xlsx -> VisitData table
+                const res = await fetch(
+                    "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('VisitData')/rows",
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                const data = await res.json();
+
+                if (!data.value || data.value.length === 0) {
+                    alert("No data rows found in VisitData table to transfer.");
+                    return;
+                }
+
+                // Prepare row array values
+                const rawRows = data.value.map(row => row.values[0]);
+
+                // Step 2: Post rows to MasterApp_Data.xlsx -> MasterData table
+                // (Fallback tries worksheet append if table isn't created as a formatted table)
+                let masterRes = await fetch(
+                    "https://graph.microsoft.com/v1.0/me/drive/root:/MasterApp_Data.xlsx:/workbook/tables('MasterData')/rows/add",
+                    {
+                        method: "POST",
+                        headers,
+                        body: JSON.stringify({ values: rawRows })
+                    }
+                );
+
+                if (!masterRes.ok) {
+                    // Try targeting worksheet 'MasterData' directly if MasterData isn't formatted as an Excel Table
+                    masterRes = await fetch(
+                        "https://graph.microsoft.com/v1.0/me/drive/root:/MasterApp_Data.xlsx:/workbook/worksheets('MasterData')/usedRange",
+                        {
+                            method: "PATCH",
+                            headers,
+                            body: JSON.stringify({ values: rawRows })
+                        }
+                    );
+                }
+
+                if (!masterRes.ok) {
+                    const errPayload = await masterRes.json();
+                    throw new Error("Failed writing to MasterApp_Data.xlsx: " + (errPayload.error ? errPayload.error.message : "Unknown error"));
+                }
+
+                // Step 3: Clear rows from App_Data.xlsx -> VisitData table
+                // Deleting rows in reverse index order to avoid index shifting errors
+                const rowCount = data.value.length;
+                for (let i = rowCount - 1; i >= 0; i--) {
+                    await fetch(
+                        `https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('VisitData')/rows/$/itemAt(index=${i})`,
+                        {
+                            method: "DELETE",
+                            headers: { Authorization: `Bearer ${token}` }
+                        }
+                    );
+                }
+
+                alert(`Successfully transferred ${rowCount} records to MasterApp_Data.xlsx and cleared the VisitData table!`);
+
+                // Refresh Staging Table UI
+                await fetchStagingFromOneDrive();
+
+            } catch (err) {
+                console.error("Master Sync Error:", err);
+                alert("Error during master sync: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-file-export"></i><span>Sync & Clear to Master Data</span>';
             }
-
-            let csvContent = "data:text/csv;charset=utf-8,VisitDate,Customer,Chargeable,Product,Qty\n";
-            stagingData.forEach(r => {
-                csvContent += `"${formatDateDisplay(r.visitDate)}","${r.customer}","${r.chargeable}","${r.product}",${r.qty}\n`;
-            });
-
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "Macro_Master_File.csv");
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            alert(`${stagingData.length} records exported to Master CSV!`);
         }
 
         renderStagingTable();
