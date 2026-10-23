@@ -296,7 +296,6 @@
 
             // Aligns with exact 7-column Excel schema: [SyncStatus, VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
             const rowsToInsert = cartItems.map(item => [
-                "",            // Column A: SyncStatus (Blank)
                 formattedDate, // Column B: VisitDate (DD/MM/YYYY)
                 customer,      // Column C: Customer
                 chargeable,    // Column D: Chargeable
