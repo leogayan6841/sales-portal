@@ -104,12 +104,6 @@
                     </div>
                 </div>
 
-                <!-- MYOB Update Notes -->
-                <div>
-                    <label class="block text-xs font-semibold uppercase text-slate-600 mb-1">MYOB Update Note</label>
-                    <input type="text" id="myobNote" placeholder="Optional notes..." class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-                </div>
-
                 <!-- Submit Button -->
                 <button type="submit" id="submitBtn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-sm shadow transition flex items-center justify-center space-x-2">
                     <i class="fa-solid fa-paper-plane"></i>
@@ -135,17 +129,16 @@
                     </div>
                 </div>
 
-                <!-- Staging Table -->
+                <!-- Staging Table (Status column removed) -->
                 <div class="overflow-x-auto border rounded-lg">
                     <table class="w-full text-left text-xs">
                         <thead class="bg-slate-800 text-white uppercase text-[10px] tracking-wider">
                             <tr>
-                                <th class="p-2.5">Status</th>
                                 <th class="p-2.5">Date</th>
                                 <th class="p-2.5">Customer</th>
+                                <th class="p-2.5">Chargeable</th>
                                 <th class="p-2.5">Product</th>
                                 <th class="p-2.5 text-center">Qty</th>
-                                <th class="p-2.5">Chargeable</th>
                             </tr>
                         </thead>
                         <tbody id="stagingTableBody" class="divide-y divide-slate-200">
@@ -176,6 +169,17 @@
         let stagingData = [];
 
         document.getElementById('visitDate').valueAsDate = new Date();
+
+        // Helper function: Format date as DD/MM/YYYY for display
+        function formatDateDisplay(dateStr) {
+            if (!dateStr) return "";
+            if (dateStr.includes("/")) return dateStr;
+            const parts = dateStr.split("-");
+            if (parts.length === 3) {
+                return `${parts[2]}/${parts[1]}/${parts[0]}`; // Convert YYYY-MM-DD to DD/MM/YYYY
+            }
+            return dateStr;
+        }
 
         // --- 3. GET OR REFRESH ACCESSTOKEN ---
         async function getAccessToken() {
@@ -257,13 +261,11 @@
                     data.value.forEach(row => {
                         const v = row.values[0];
                         stagingData.push({
-                            status: v[0] || "Pending",
-                            visitDate: v[1] || "",
-                            customer: v[2] || "",
-                            chargeable: v[3] || "",
-                            product: v[4] || "",
-                            qty: v[5] || 0,
-                            myob: v[6] || ""
+                            visitDate: v[0] || "",
+                            customer: v[1] || "",
+                            chargeable: v[2] || "",
+                            product: v[3] || "",
+                            qty: v[4] || 0
                         });
                     });
                 }
@@ -273,7 +275,7 @@
             }
         }
 
-        // --- 6. SUBMIT SALESMAN ENTRY & POST TO ONEDRIVE ---
+        // --- 6. SUBMIT SALESMAN ENTRY & POST TO ONEDRIVE (Without Status column) ---
         async function handleFormSubmit(e) {
             e.preventDefault();
             if (cartItems.length === 0) {
@@ -285,26 +287,23 @@
             submitBtn.disabled = true;
             submitBtn.innerText = "Saving to OneDrive...";
 
-            const visitDate = document.getElementById("visitDate").value;
+            const rawVisitDate = document.getElementById("visitDate").value;
+            const formattedDate = formatDateDisplay(rawVisitDate); // DD/MM/YYYY
             const customer = document.getElementById("customer").value;
             const chargeable = document.getElementById("chargeable").value;
-            const myob = document.getElementById("myobNote").value;
 
-            // Build payload rows for Excel Table (VisitData)
+            // Build payload rows without status column: [VisitDate, Customer, Chargeable, Product, Qty]
             const rowsToInsert = cartItems.map(item => [
-                "Pending",   // SyncStatus
-                visitDate,   // VisitDate
-                customer,    // Customer
-                chargeable,  // Chargeable
-                item.product,// Product
-                item.qty,    // Qty
-                myob         // MYOBUpdate
+                formattedDate, // VisitDate (DD/MM/YYYY)
+                customer,      // Customer
+                chargeable,    // Chargeable
+                item.product,  // Product
+                item.qty       // Qty
             ]);
 
             try {
                 const token = await getAccessToken();
                 
-                // Post Rows to Microsoft Graph API for VisitData Table
                 const response = await fetch(
                     "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('VisitData')/rows/add",
                     {
@@ -324,11 +323,10 @@
                 alert("Visit entry saved directly to OneDrive App_Data.xlsx!");
 
                 // --- RESET FORM FIELDS ---
-                document.getElementById("visitDate").valueAsDate = new Date(); // Reset to today's date
-                document.getElementById("customer").value = "";                // Reset Customer dropdown
-                document.getElementById("chargeable").value = "Yes";           // Reset Chargeable dropdown
-                document.getElementById("myobNote").value = "";               // Reset MYOB Note
-                cartItems = [];                                                // Clear product cart
+                document.getElementById("visitDate").valueAsDate = new Date();
+                document.getElementById("customer").value = "";
+                document.getElementById("chargeable").value = "Yes";
+                cartItems = [];
                 renderCart();
 
                 // Refresh table display
@@ -336,7 +334,7 @@
 
             } catch (err) {
                 console.error("OneDrive Save Error:", err);
-                alert("Error saving to OneDrive. Please ensure you clicked 'Sync OneDrive Data' and granted edit permissions.");
+                alert("Error saving to OneDrive. Please ensure you clicked 'Sync OneDrive Data'.");
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Save Visit Entry to OneDrive</span>';
@@ -381,26 +379,21 @@
             `).join("");
         }
 
-        // --- 8. RENDER STAGING TABLE ---
+        // --- 8. RENDER STAGING TABLE (Status column removed, date formatted) ---
         function renderStagingTable() {
             const tbody = document.getElementById("stagingTableBody");
             if (stagingData.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400 italic">No entries in staging table</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400 italic">No entries in staging table</td></tr>`;
                 return;
             }
 
             tbody.innerHTML = stagingData.map(row => `
                 <tr class="hover:bg-slate-50">
-                    <td class="p-2.5">
-                        <span class="px-2 py-0.5 text-[10px] font-bold rounded ${row.status === 'Pending' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}">
-                            ${row.status}
-                        </span>
-                    </td>
-                    <td class="p-2.5 font-medium">${row.visitDate}</td>
+                    <td class="p-2.5 font-medium">${formatDateDisplay(row.visitDate)}</td>
                     <td class="p-2.5">${row.customer}</td>
+                    <td class="p-2.5">${row.chargeable}</td>
                     <td class="p-2.5 font-semibold text-indigo-900">${row.product}</td>
                     <td class="p-2.5 text-center font-bold">${row.qty}</td>
-                    <td class="p-2.5">${row.chargeable}</td>
                 </tr>
             `).join("");
         }
@@ -430,15 +423,14 @@
 
         // --- 10. ADMIN SYNC & CLEAR MASTER ---
         function syncAndClearMaster() {
-            const pendingRows = stagingData.filter(r => r.status === "Pending");
-            if (pendingRows.length === 0) {
-                alert("No pending records to sync.");
+            if (stagingData.length === 0) {
+                alert("No records to export.");
                 return;
             }
 
-            let csvContent = "data:text/csv;charset=utf-8,VisitDate,Customer,Chargeable,Product,Qty,MYOBUpdate\n";
-            pendingRows.forEach(r => {
-                csvContent += `"${r.visitDate}","${r.customer}","${r.chargeable}","${r.product}",${r.qty},"${r.myob}"\n`;
+            let csvContent = "data:text/csv;charset=utf-8,VisitDate,Customer,Chargeable,Product,Qty\n";
+            stagingData.forEach(r => {
+                csvContent += `"${formatDateDisplay(r.visitDate)}","${r.customer}","${r.chargeable}","${r.product}",${r.qty}\n`;
             });
 
             const encodedUri = encodeURI(csvContent);
@@ -449,7 +441,7 @@
             link.click();
             document.body.removeChild(link);
 
-            alert(`${pendingRows.length} pending records exported to Master CSV!`);
+            alert(`${stagingData.length} records exported to Master CSV!`);
         }
 
         renderStagingTable();
