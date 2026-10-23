@@ -51,7 +51,7 @@
                     <input type="date" id="visitDate" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
                 </div>
 
-                <!-- Customer Selection (Loaded dynamically from CustomerTable sheet) -->
+                <!-- Customer Selection -->
                 <div>
                     <label class="block text-xs font-semibold uppercase text-slate-600 mb-1">Customer Name</label>
                     <select id="customer" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
@@ -73,7 +73,6 @@
                     <label class="block text-xs font-bold uppercase text-indigo-900">Add Products to Visit</label>
                     <div class="grid grid-cols-12 gap-2">
                         <div class="col-span-7">
-                            <!-- Product Selection (Loaded dynamically from ProductTable sheet) -->
                             <select id="productSelect" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
                                 <option value="">-- Select Product --</option>
                             </select>
@@ -112,9 +111,9 @@
                 </div>
 
                 <!-- Submit Button -->
-                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-sm shadow transition flex items-center justify-center space-x-2">
+                <button type="submit" id="submitBtn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-sm shadow transition flex items-center justify-center space-x-2">
                     <i class="fa-solid fa-paper-plane"></i>
-                    <span>Save Visit Entry (Salesman)</span>
+                    <span>Save Visit Entry to OneDrive</span>
                 </button>
             </form>
         </div>
@@ -125,10 +124,9 @@
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-4 mb-4 gap-3">
                     <div>
                         <h2 class="text-lg font-bold text-slate-900">App Staging Table</h2>
-                        <p class="text-xs text-slate-500">Live entries waiting for master transfer</p>
+                        <p class="text-xs text-slate-500">Live entries in OneDrive VisitData sheet</p>
                     </div>
 
-                    <!-- Admin Only Sync Action -->
                     <div id="adminControls" class="hidden">
                         <button onclick="syncAndClearMaster()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-4 py-2 rounded-lg text-xs shadow transition flex items-center space-x-2">
                             <i class="fa-solid fa-file-export"></i>
@@ -160,111 +158,192 @@
     </main>
 
     <script>
-        // --- 1. MSAL & MICROSOFT GRAPH CONFIGURATION ---
+        // --- 1. MSAL CONFIGURATION ---
         const msalConfig = {
             auth: {
-                clientId: "570314e5-83d8-4908-b41d-e9a3e1af7731", // Your Azure Application Client ID
+                clientId: "570314e5-83d8-4908-b41d-e9a3e1af7731",
                 authority: "https://login.microsoftonline.com/common",
                 redirectUri: "https://leogayan6841.github.io/sales-portal/"
             }
         };
 
         const msalInstance = new msal.PublicClientApplication(msalConfig);
+        let accessToken = null;
 
         // --- 2. DATA STRUCTURES ---
-        let currentRole = "salesman"; // 'salesman' or 'admin'
+        let currentRole = "salesman";
         let cartItems = [];
         let stagingData = [];
 
-        // Set default date
         document.getElementById('visitDate').valueAsDate = new Date();
 
-        // --- 3. FETCH CUSTOMERS & PRODUCTS FROM ONEDRIVE (App_Data.xlsx) ---
+        // --- 3. GET OR REFRESH ACCESSTOKEN ---
+        async function getAccessToken() {
+            if (accessToken) return accessToken;
+            const loginResponse = await msalInstance.loginPopup({
+                scopes: ["Files.ReadWrite.All"]
+            });
+            accessToken = loginResponse.accessToken;
+            return accessToken;
+        }
+
+        // --- 4. FETCH CUSTOMERS & PRODUCTS FROM ONEDRIVE ---
         async function fetchOneDriveLists() {
             const statusText = document.getElementById("syncStatusText");
             try {
                 statusText.innerText = "OneDrive: Connecting...";
-                
-                // Trigger Microsoft Sign-In Popup
-                const loginResponse = await msalInstance.loginPopup({
-                    scopes: ["Files.Read.All"]
-                });
-
-                const token = loginResponse.accessToken;
+                const token = await getAccessToken();
                 const headers = { Authorization: `Bearer ${token}` };
 
-                // A. Fetch Customer Names from "CustomerTable" sheet
+                // A. Fetch Customer Names
                 const custRes = await fetch(
                     "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/worksheets('CustomerTable')/usedRange", 
                     { headers }
                 );
                 const custData = await custRes.json();
-                
                 const custSelect = document.getElementById("customer");
                 custSelect.innerHTML = '<option value="">-- Select Customer --</option>';
                 if (custData.values && custData.values.length > 1) {
                     for (let i = 1; i < custData.values.length; i++) {
-                        const customerName = custData.values[i][0]; // Column A: CustomerName
+                        const customerName = custData.values[i][0];
                         if (customerName) {
                             custSelect.innerHTML += `<option value="${customerName}">${customerName}</option>`;
                         }
                     }
                 }
 
-                // B. Fetch Product Names from "ProductTable" sheet
+                // B. Fetch Product Names
                 const prodRes = await fetch(
                     "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/worksheets('ProductTable')/usedRange", 
                     { headers }
                 );
                 const prodData = await prodRes.json();
-                
                 const prodSelect = document.getElementById("productSelect");
                 prodSelect.innerHTML = '<option value="">-- Select Product --</option>';
                 if (prodData.values && prodData.values.length > 1) {
                     for (let i = 1; i < prodData.values.length; i++) {
-                        const productName = prodData.values[i][0]; // Column A: ProductName
+                        const productName = prodData.values[i][0];
                         if (productName) {
                             prodSelect.innerHTML += `<option value="${productName}">${productName}</option>`;
                         }
                     }
                 }
 
+                // C. Load Existing VisitData Table
+                await fetchStagingFromOneDrive();
+
                 statusText.innerText = "OneDrive: Connected";
                 statusText.className = "text-xs text-emerald-600 font-semibold";
-                alert("Successfully loaded Customer & Product lists from App_Data.xlsx!");
 
             } catch (err) {
                 console.error("OneDrive Fetch Error:", err);
                 statusText.innerText = "OneDrive: Sync Failed";
                 statusText.className = "text-xs text-red-500 font-semibold";
-                alert("Failed to load lists from OneDrive. Please make sure App_Data.xlsx is in your OneDrive root folder.");
+                alert("Failed to load lists from OneDrive. Check console details.");
             }
         }
 
-        // --- 4. ROLE SWITCHING LOGIC ---
-        function toggleRole() {
-            if (currentRole === "salesman") {
-                const pwd = prompt("Enter Admin Password to switch (Default: admin123):");
-                if (pwd === "admin123") {
-                    currentRole = "admin";
-                    document.getElementById("roleBadge").className = "bg-purple-600 text-white font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
-                    document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-gear mr-1"></i> Admin Mode';
-                    document.getElementById("toggleRoleBtn").innerText = "Switch to Salesman";
-                    document.getElementById("adminControls").classList.remove("hidden");
-                } else if (pwd !== null) {
-                    alert("Incorrect Password!");
+        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE (VisitData) ---
+        async function fetchStagingFromOneDrive() {
+            try {
+                const token = await getAccessToken();
+                const res = await fetch(
+                    "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('VisitData')/rows",
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                const data = await res.json();
+                stagingData = [];
+                if (data.value) {
+                    data.value.forEach(row => {
+                        const v = row.values[0];
+                        stagingData.push({
+                            status: v[0] || "Pending",
+                            visitDate: v[1] || "",
+                            customer: v[2] || "",
+                            chargeable: v[3] || "",
+                            product: v[4] || "",
+                            qty: v[5] || 0,
+                            myob: v[6] || ""
+                        });
+                    });
                 }
-            } else {
-                currentRole = "salesman";
-                document.getElementById("roleBadge").className = "bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
-                document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode';
-                document.getElementById("toggleRoleBtn").innerText = "Switch to Salesman";
-                document.getElementById("adminControls").classList.add("hidden");
+                renderStagingTable();
+            } catch (e) {
+                console.log("Staging load error or table empty:", e);
             }
-            renderStagingTable();
         }
 
-        // --- 5. CART / LINE ITEM MANAGEMENT ---
+        // --- 6. SUBMIT SALESMAN ENTRY & POST TO ONEDRIVE ---
+        async function handleFormSubmit(e) {
+            e.preventDefault();
+            if (cartItems.length === 0) {
+                alert("Please add at least one product line item before saving.");
+                return;
+            }
+
+            const submitBtn = document.getElementById("submitBtn");
+            submitBtn.disabled = true;
+            submitBtn.innerText = "Saving to OneDrive...";
+
+            const visitDate = document.getElementById("visitDate").value;
+            const customer = document.getElementById("customer").value;
+            const chargeable = document.getElementById("chargeable").value;
+            const myob = document.getElementById("myobNote").value;
+
+            // Build payload rows for Excel Table (VisitData)
+            const rowsToInsert = cartItems.map(item => [
+                "Pending",   // SyncStatus
+                visitDate,   // VisitDate
+                customer,    // Customer
+                chargeable,  // Chargeable
+                item.product,// Product
+                item.qty,    // Qty
+                myob         // MYOBUpdate
+            ]);
+
+            try {
+                const token = await getAccessToken();
+                
+                // Post Rows to Microsoft Graph API for VisitData Table
+                const response = await fetch(
+                    "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('VisitData')/rows/add",
+                    {
+                        method: "POST",
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({ values: rowsToInsert })
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error("Failed to write to OneDrive");
+                }
+
+                alert("Visit entry saved directly to OneDrive App_Data.xlsx!");
+
+                // --- RESET FORM FIELDS ---
+                document.getElementById("visitDate").valueAsDate = new Date(); // Reset to today's date
+                document.getElementById("customer").value = "";                // Reset Customer dropdown
+                document.getElementById("chargeable").value = "Yes";           // Reset Chargeable dropdown
+                document.getElementById("myobNote").value = "";               // Reset MYOB Note
+                cartItems = [];                                                // Clear product cart
+                renderCart();
+
+                // Refresh table display
+                await fetchStagingFromOneDrive();
+
+            } catch (err) {
+                console.error("OneDrive Save Error:", err);
+                alert("Error saving to OneDrive. Please ensure you clicked 'Sync OneDrive Data' and granted edit permissions.");
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Save Visit Entry to OneDrive</span>';
+            }
+        }
+
+        // --- 7. CART / LINE ITEM MANAGEMENT ---
         function addLineItem() {
             const prod = document.getElementById("productSelect").value;
             const qty = document.getElementById("productQty").value;
@@ -302,40 +381,7 @@
             `).join("");
         }
 
-        // --- 6. SUBMIT SALESMAN ENTRY TO STAGING ---
-        function handleFormSubmit(e) {
-            e.preventDefault();
-            if (cartItems.length === 0) {
-                alert("Please add at least one product line item before saving.");
-                return;
-            }
-
-            const visitDate = document.getElementById("visitDate").value;
-            const customer = document.getElementById("customer").value;
-            const chargeable = document.getElementById("chargeable").value;
-            const myob = document.getElementById("myobNote").value;
-
-            cartItems.forEach(item => {
-                stagingData.push({
-                    id: Date.now().toString() + Math.random().toString(36).substr(2, 4),
-                    status: "Pending",
-                    visitDate,
-                    customer,
-                    chargeable,
-                    product: item.product,
-                    qty: item.qty,
-                    myob
-                });
-            });
-
-            cartItems = [];
-            renderCart();
-            document.getElementById("myobNote").value = "";
-            alert("Visit entry successfully saved to Staging Table!");
-            renderStagingTable();
-        }
-
-        // --- 7. RENDER STAGING TABLE ---
+        // --- 8. RENDER STAGING TABLE ---
         function renderStagingTable() {
             const tbody = document.getElementById("stagingTableBody");
             if (stagingData.length === 0) {
@@ -359,7 +405,30 @@
             `).join("");
         }
 
-        // --- 8. ADMIN SYNC & CLEAR MASTER ---
+        // --- 9. ROLE SWITCHING ---
+        function toggleRole() {
+            if (currentRole === "salesman") {
+                const pwd = prompt("Enter Admin Password to switch (Default: admin123):");
+                if (pwd === "admin123") {
+                    currentRole = "admin";
+                    document.getElementById("roleBadge").className = "bg-purple-600 text-white font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
+                    document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-gear mr-1"></i> Admin Mode';
+                    document.getElementById("toggleRoleBtn").innerText = "Switch to Salesman";
+                    document.getElementById("adminControls").classList.remove("hidden");
+                } else if (pwd !== null) {
+                    alert("Incorrect Password!");
+                }
+            } else {
+                currentRole = "salesman";
+                document.getElementById("roleBadge").className = "bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
+                document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode';
+                document.getElementById("toggleRoleBtn").innerText = "Switch to Salesman";
+                document.getElementById("adminControls").classList.add("hidden");
+            }
+            renderStagingTable();
+        }
+
+        // --- 10. ADMIN SYNC & CLEAR MASTER ---
         function syncAndClearMaster() {
             const pendingRows = stagingData.filter(r => r.status === "Pending");
             if (pendingRows.length === 0) {
@@ -380,14 +449,9 @@
             link.click();
             document.body.removeChild(link);
 
-            // Clear processed rows from staging data
-            stagingData = stagingData.filter(r => r.status !== "Pending");
-            renderStagingTable();
-
-            alert(`${pendingRows.length} pending records exported to Master CSV and cleared from staging!`);
+            alert(`${pendingRows.length} pending records exported to Master CSV!`);
         }
 
-        // Initial render
         renderStagingTable();
     </script>
 </body>
