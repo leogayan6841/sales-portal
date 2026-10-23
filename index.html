@@ -170,7 +170,6 @@
 
         document.getElementById('visitDate').valueAsDate = new Date();
 
-        // Helper: Convert YYYY-MM-DD to DD/MM/YYYY
         function formatDateDisplay(dateStr) {
             if (!dateStr) return "";
             if (typeof dateStr !== "string") return dateStr;
@@ -249,7 +248,7 @@
             }
         }
 
-        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE (Aligned with 7-column Excel schema) ---
+        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE (Adjusted for 6-column Excel schema without SyncStatus) ---
         async function fetchStagingFromOneDrive() {
             try {
                 const token = await getAccessToken();
@@ -263,21 +262,20 @@
                     data.value.forEach(row => {
                         const v = row.values[0];
                         
-                        // Excel Table Order:
-                        // Index 0: SyncStatus (Blank)
-                        // Index 1: VisitDate
-                        // Index 2: Customer
-                        // Index 3: Chargeable
-                        // Index 4: Product
-                        // Index 5: Qty
-                        // Index 6: MYOBUpdate (Blank)
+                        // Excel Table Column Order (SyncStatus Removed):
+                        // Index 0: VisitDate
+                        // Index 1: Customer
+                        // Index 2: Chargeable
+                        // Index 3: Product
+                        // Index 4: Qty
+                        // Index 5: MYOBUpdate (Blank)
                         
                         stagingData.push({
-                            visitDate: v[1] || "",
-                            customer: v[2] || "",
-                            chargeable: v[3] || "",
-                            product: v[4] || "",
-                            qty: v[5] || 0
+                            visitDate: v[0] || "",
+                            customer: v[1] || "",
+                            chargeable: v[2] || "",
+                            product: v[3] || "",
+                            qty: v[4] || 0
                         });
                     });
                 }
@@ -304,15 +302,14 @@
             const customer = document.getElementById("customer").value;
             const chargeable = document.getElementById("chargeable").value;
 
-            // Inserts 7-column row: [SyncStatus, VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
+            // Inserts 6-column row: [VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
             const rowsToInsert = cartItems.map(item => [
-                "",            // Index 0: SyncStatus (Blank)
-                formattedDate, // Index 1: VisitDate (DD/MM/YYYY)
-                customer,      // Index 2: Customer
-                chargeable,    // Index 3: Chargeable
-                item.product,  // Index 4: Product
-                item.qty,      // Index 5: Qty
-                ""             // Index 6: MYOBUpdate (Blank)
+                formattedDate, // Index 0: VisitDate (DD/MM/YYYY)
+                customer,      // Index 1: Customer
+                chargeable,    // Index 2: Chargeable
+                item.product,  // Index 3: Product
+                item.qty,      // Index 4: Qty
+                ""             // Index 5: MYOBUpdate (Blank)
             ]);
 
             try {
