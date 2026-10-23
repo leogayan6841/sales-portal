@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICT Asyst - Sales & Master Portal</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Microsoft Authentication Library (MSAL) -->
+    <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen">
+
+    <!-- Header / Navigation -->
+    <header class="bg-indigo-900 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-boxes-packing text-2xl text-amber-400"></i>
+                <h1 class="text-xl font-bold tracking-wide">ICT Asyst - Sales & Master Portal</h1>
+            </div>
+            <div class="flex items-center space-x-3">
+                <button onclick="fetchOneDriveLists()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded transition font-medium flex items-center space-x-1">
+                    <i class="fa-solid fa-sync"></i>
+                    <span>Sync OneDrive Data</span>
+                </button>
+                <span id="roleBadge" class="bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider">
+                    <i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode
+                </span>
+                <button id="toggleRoleBtn" onclick="toggleRole()" class="bg-indigo-700 hover:bg-indigo-600 text-white text-xs px-3 py-1.5 rounded transition font-medium border border-indigo-500">
+                    Switch to Admin
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+        <!-- LEFT COLUMN: Salesman Entry Form -->
+        <div class="lg:col-span-5 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="text-lg font-bold text-slate-900 border-b pb-3 mb-4 flex items-center justify-between">
+                <span><i class="fa-solid fa-cart-plus text-indigo-600 mr-2"></i> Log Visit Entry</span>
+                <span id="syncStatusText" class="text-xs text-slate-400 font-normal">OneDrive: Disconnected</span>
+            </h2>
+
+            <form id="visitForm" onsubmit="handleFormSubmit(event)" class="space-y-4">
+                <!-- Visit Date -->
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-600 mb-1">Visit Date</label>
+                    <input type="date" id="visitDate" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <!-- Customer Selection (Loaded dynamically from CustomerTable sheet) -->
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-600 mb-1">Customer Name</label>
+                    <select id="customer" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="">-- Click 'Sync OneDrive Data' to Load --</option>
+                    </select>
+                </div>
+
+                <!-- Chargeable -->
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-600 mb-1">Chargeable</label>
+                    <select id="chargeable" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="Yes">Yes</option>
+                        <option value="No">No</option>
+                    </select>
+                </div>
+
+                <!-- Line Item Cart Container -->
+                <div class="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                    <label class="block text-xs font-bold uppercase text-indigo-900">Add Products to Visit</label>
+                    <div class="grid grid-cols-12 gap-2">
+                        <div class="col-span-7">
+                            <!-- Product Selection (Loaded dynamically from ProductTable sheet) -->
+                            <select id="productSelect" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                                <option value="">-- Select Product --</option>
+                            </select>
+                        </div>
+                        <div class="col-span-3">
+                            <input type="number" id="productQty" min="1" placeholder="Qty" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        </div>
+                        <div class="col-span-2">
+                            <button type="button" onclick="addLineItem()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 rounded-lg text-sm font-bold transition">
+                                <i class="fa-solid fa-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Selected Cart Items Table -->
+                    <div class="mt-2 border rounded-lg bg-white overflow-hidden">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-100 border-b text-slate-600">
+                                <tr>
+                                    <th class="p-2">Product</th>
+                                    <th class="p-2 w-16 text-center">Qty</th>
+                                    <th class="p-2 w-10 text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cartTableBody" class="divide-y divide-slate-100">
+                                <tr><td colspan="3" class="p-3 text-center text-slate-400 italic">No products added yet</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- MYOB Update Notes -->
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-600 mb-1">MYOB Update Note</label>
+                    <input type="text" id="myobNote" placeholder="Optional notes..." class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <!-- Submit Button -->
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-sm shadow transition flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-paper-plane"></i>
+                    <span>Save Visit Entry (Salesman)</span>
+                </button>
+            </form>
+        </div>
+
+        <!-- RIGHT COLUMN: Staging & Admin View -->
+        <div class="lg:col-span-7 space-y-6">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-4 mb-4 gap-3">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-900">App Staging Table</h2>
+                        <p class="text-xs text-slate-500">Live entries waiting for master transfer</p>
+                    </div>
+
+                    <!-- Admin Only Sync Action -->
+                    <div id="adminControls" class="hidden">
+                        <button onclick="syncAndClearMaster()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-4 py-2 rounded-lg text-xs shadow transition flex items-center space-x-2">
+                            <i class="fa-solid fa-file-export"></i>
+                            <span>Sync & Clear to Master (CSV)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Staging Table -->
+                <div class="overflow-x-auto border rounded-lg">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-slate-800 text-white uppercase text-[10px] tracking-wider">
+                            <tr>
+                                <th class="p-2.5">Status</th>
+                                <th class="p-2.5">Date</th>
+                                <th class="p-2.5">Customer</th>
+                                <th class="p-2.5">Product</th>
+                                <th class="p-2.5 text-center">Qty</th>
+                                <th class="p-2.5">Chargeable</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stagingTableBody" class="divide-y divide-slate-200">
+                            <!-- Dynamically filled -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- 1. MSAL & MICROSOFT GRAPH CONFIGURATION ---
+        const msalConfig = {
+            auth: {
+                clientId: "570314e5-83d8-4908-b41d-e9a3e1af7731", // Your Azure Application Client ID
+                authority: "https://login.microsoftonline.com/common",
+                redirectUri: window.location.origin
+            }
+        };
+
+        const msalInstance = new msal.PublicClientApplication(msalConfig);
+
+        // --- 2. DATA STRUCTURES ---
+        let currentRole = "salesman"; // 'salesman' or 'admin'
+        let cartItems = [];
+        let stagingData = [];
+
+        // Set default date
+        document.getElementById('visitDate').valueAsDate = new Date();
+
+        // --- 3. FETCH CUSTOMERS & PRODUCTS FROM ONEDRIVE (App_Data.xlsx) ---
+        async function fetchOneDriveLists() {
+            const statusText = document.getElementById("syncStatusText");
+            try {
+                statusText.innerText = "OneDrive: Connecting...";
+                
+                // Trigger Microsoft Sign-In Popup
+                const loginResponse = await msalInstance.loginPopup({
+                    scopes: ["Files.Read.All"]
+                });
+
+                const token = loginResponse.accessToken;
+                const headers = { Authorization: `Bearer ${token}` };
+
+                // A. Fetch Customer Names from "CustomerTable" sheet
+                const custRes = await fetch(
+                    "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/worksheets('CustomerTable')/usedRange", 
+                    { headers }
+                );
+                const custData = await custRes.json();
+                
+                const custSelect = document.getElementById("customer");
+                custSelect.innerHTML = '<option value="">-- Select Customer --</option>';
+                if (custData.values && custData.values.length > 1) {
+                    for (let i = 1; i < custData.values.length; i++) {
+                        const customerName = custData.values[i][0]; // Column A: CustomerName
+                        if (customerName) {
+                            custSelect.innerHTML += `<option value="${customerName}">${customerName}</option>`;
+                        }
+                    }
+                }
+
+                // B. Fetch Product Names from "ProductTable" sheet
+                const prodRes = await fetch(
+                    "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/worksheets('ProductTable')/usedRange", 
+                    { headers }
+                );
+                const prodData = await prodRes.json();
+                
+                const prodSelect = document.getElementById("productSelect");
+                prodSelect.innerHTML = '<option value="">-- Select Product --</option>';
+                if (prodData.values && prodData.values.length > 1) {
+                    for (let i = 1; i < prodData.values.length; i++) {
+                        const productName = prodData.values[i][0]; // Column A: ProductName
+                        if (productName) {
+                            prodSelect.innerHTML += `<option value="${productName}">${productName}</option>`;
+                        }
+                    }
+                }
+
+                statusText.innerText = "OneDrive: Connected";
+                statusText.className = "text-xs text-emerald-600 font-semibold";
+                alert("Successfully loaded Customer & Product lists from App_Data.xlsx!");
+
+            } catch (err) {
+                console.error("OneDrive Fetch Error:", err);
+                statusText.innerText = "OneDrive: Sync Failed";
+                statusText.className = "text-xs text-red-500 font-semibold";
+                alert("Failed to load lists from OneDrive. Please make sure App_Data.xlsx is in your OneDrive root folder.");
+            }
+        }
+
+        // --- 4. ROLE SWITCHING LOGIC ---
+        function toggleRole() {
+            if (currentRole === "salesman") {
+                const pwd = prompt("Enter Admin Password to switch (Default: admin123):");
+                if (pwd === "admin123") {
+                    currentRole = "admin";
+                    document.getElementById("roleBadge").className = "bg-purple-600 text-white font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
+                    document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-gear mr-1"></i> Admin Mode';
+                    document.getElementById("toggleRoleBtn").innerText = "Switch to Salesman";
+                    document.getElementById("adminControls").classList.remove("hidden");
+                } else if (pwd !== null) {
+                    alert("Incorrect Password!");
+                }
+            } else {
+                currentRole = "salesman";
+                document.getElementById("roleBadge").className = "bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
+                document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode';
+                document.getElementById("toggleRoleBtn").innerText = "Switch to Salesman";
+                document.getElementById("adminControls").classList.add("hidden");
+            }
+            renderStagingTable();
+        }
+
+        // --- 5. CART / LINE ITEM MANAGEMENT ---
+        function addLineItem() {
+            const prod = document.getElementById("productSelect").value;
+            const qty = document.getElementById("productQty").value;
+
+            if (!prod || !qty || qty <= 0) {
+                alert("Please select a product and enter a valid quantity.");
+                return;
+            }
+
+            cartItems.push({ product: prod, qty: parseInt(qty) });
+            document.getElementById("productSelect").value = "";
+            document.getElementById("productQty").value = "";
+            renderCart();
+        }
+
+        function removeCartItem(index) {
+            cartItems.splice(index, 1);
+            renderCart();
+        }
+
+        function renderCart() {
+            const tbody = document.getElementById("cartTableBody");
+            if (cartItems.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" class="p-3 text-center text-slate-400 italic">No products added yet</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = cartItems.map((item, idx) => `
+                <tr>
+                    <td class="p-2 font-medium text-slate-800">${item.product}</td>
+                    <td class="p-2 text-center font-bold">${item.qty}</td>
+                    <td class="p-2 text-center">
+                        <button onclick="removeCartItem(${idx})" class="text-red-500 hover:text-red-700"><i class="fa-solid fa-trash-can"></i></button>
+                    </td>
+                </tr>
+            `).join("");
+        }
+
+        // --- 6. SUBMIT SALESMAN ENTRY TO STAGING ---
+        function handleFormSubmit(e) {
+            e.preventDefault();
+            if (cartItems.length === 0) {
+                alert("Please add at least one product line item before saving.");
+                return;
+            }
+
+            const visitDate = document.getElementById("visitDate").value;
+            const customer = document.getElementById("customer").value;
+            const chargeable = document.getElementById("chargeable").value;
+            const myob = document.getElementById("myobNote").value;
+
+            cartItems.forEach(item => {
+                stagingData.push({
+                    id: Date.now().toString() + Math.random().toString(36).substr(2, 4),
+                    status: "Pending",
+                    visitDate,
+                    customer,
+                    chargeable,
+                    product: item.product,
+                    qty: item.qty,
+                    myob
+                });
+            });
+
+            cartItems = [];
+            renderCart();
+            document.getElementById("myobNote").value = "";
+            alert("Visit entry successfully saved to Staging Table!");
+            renderStagingTable();
+        }
+
+        // --- 7. RENDER STAGING TABLE ---
+        function renderStagingTable() {
+            const tbody = document.getElementById("stagingTableBody");
+            if (stagingData.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-slate-400 italic">No entries in staging table</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = stagingData.map(row => `
+                <tr class="hover:bg-slate-50">
+                    <td class="p-2.5">
+                        <span class="px-2 py-0.5 text-[10px] font-bold rounded ${row.status === 'Pending' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}">
+                            ${row.status}
+                        </span>
+                    </td>
+                    <td class="p-2.5 font-medium">${row.visitDate}</td>
+                    <td class="p-2.5">${row.customer}</td>
+                    <td class="p-2.5 font-semibold text-indigo-900">${row.product}</td>
+                    <td class="p-2.5 text-center font-bold">${row.qty}</td>
+                    <td class="p-2.5">${row.chargeable}</td>
+                </tr>
+            `).join("");
+        }
+
+        // --- 8. ADMIN SYNC & CLEAR MASTER ---
+        function syncAndClearMaster() {
+            const pendingRows = stagingData.filter(r => r.status === "Pending");
+            if (pendingRows.length === 0) {
+                alert("No pending records to sync.");
+                return;
+            }
+
+            let csvContent = "data:text/csv;charset=utf-8,VisitDate,Customer,Chargeable,Product,Qty,MYOBUpdate\n";
+            pendingRows.forEach(r => {
+                csvContent += `"${r.visitDate}","${r.customer}","${r.chargeable}","${r.product}",${r.qty},"${r.myob}"\n`;
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "Macro_Master_File.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            // Clear processed rows from staging data
+            stagingData = stagingData.filter(r => r.status !== "Pending");
+            renderStagingTable();
+
+            alert(`${pendingRows.length} pending records exported to Master CSV and cleared from staging!`);
+        }
+
+        // Initial render
+        renderStagingTable();
+    </script>
+</body>
+</html>
