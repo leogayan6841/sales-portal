@@ -129,7 +129,7 @@
                     </div>
                 </div>
 
-                <!-- Staging Table (Status column removed) -->
+                <!-- Staging Table -->
                 <div class="overflow-x-auto border rounded-lg">
                     <table class="w-full text-left text-xs">
                         <thead class="bg-slate-800 text-white uppercase text-[10px] tracking-wider">
@@ -170,9 +170,10 @@
 
         document.getElementById('visitDate').valueAsDate = new Date();
 
-        // Helper: Convert YYYY-MM-DD or raw strings to DD/MM/YYYY
+        // Helper: Convert YYYY-MM-DD to DD/MM/YYYY
         function formatDateDisplay(dateStr) {
             if (!dateStr) return "";
+            if (typeof dateStr !== "string") return dateStr;
             if (dateStr.includes("/")) return dateStr;
             const parts = dateStr.split("-");
             if (parts.length === 3) {
@@ -181,7 +182,7 @@
             return dateStr;
         }
 
-        // --- 3. GET OR REFRESH ACCESSTOKEN WITH WRITE SCOPES ---
+        // --- 3. GET ACCESSTOKEN WITH WRITE SCOPES ---
         async function getAccessToken() {
             if (accessToken) return accessToken;
             const loginResponse = await msalInstance.loginPopup({
@@ -196,7 +197,7 @@
             const statusText = document.getElementById("syncStatusText");
             try {
                 statusText.innerText = "OneDrive: Connecting...";
-                accessToken = null; // Force fresh token with write permissions
+                accessToken = null;
                 const token = await getAccessToken();
                 const headers = { Authorization: `Bearer ${token}` };
 
@@ -248,7 +249,7 @@
             }
         }
 
-        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE (VisitData) ---
+        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE (Aligned with 7-column Excel schema) ---
         async function fetchStagingFromOneDrive() {
             try {
                 const token = await getAccessToken();
@@ -261,13 +262,22 @@
                 if (data.value) {
                     data.value.forEach(row => {
                         const v = row.values[0];
-                        // Extracting columns: [SyncStatus, VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
+                        
+                        // Excel Table Order:
+                        // Index 0: SyncStatus (Blank)
+                        // Index 1: VisitDate
+                        // Index 2: Customer
+                        // Index 3: Chargeable
+                        // Index 4: Product
+                        // Index 5: Qty
+                        // Index 6: MYOBUpdate (Blank)
+                        
                         stagingData.push({
-                            visitDate: v[1] || v[0] || "",
-                            customer: v[2] || v[1] || "",
-                            chargeable: v[3] || v[2] || "",
-                            product: v[4] || v[3] || "",
-                            qty: v[5] || v[4] || 0
+                            visitDate: v[1] || "",
+                            customer: v[2] || "",
+                            chargeable: v[3] || "",
+                            product: v[4] || "",
+                            qty: v[5] || 0
                         });
                     });
                 }
@@ -294,14 +304,15 @@
             const customer = document.getElementById("customer").value;
             const chargeable = document.getElementById("chargeable").value;
 
-            // Aligns with exact 7-column Excel schema: [SyncStatus, VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
+            // Inserts 7-column row: [SyncStatus, VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
             const rowsToInsert = cartItems.map(item => [
-                formattedDate, // Column B: VisitDate (DD/MM/YYYY)
-                customer,      // Column C: Customer
-                chargeable,    // Column D: Chargeable
-                item.product,  // Column E: Product
-                item.qty,      // Column F: Qty
-                ""             // Column G: MYOBUpdate (Blank)
+                "",            // Index 0: SyncStatus (Blank)
+                formattedDate, // Index 1: VisitDate (DD/MM/YYYY)
+                customer,      // Index 2: Customer
+                chargeable,    // Index 3: Chargeable
+                item.product,  // Index 4: Product
+                item.qty,      // Index 5: Qty
+                ""             // Index 6: MYOBUpdate (Blank)
             ]);
 
             try {
@@ -327,7 +338,7 @@
 
                 alert("Visit entry saved directly to OneDrive App_Data.xlsx!");
 
-                // --- RESET FORM FIELDS ---
+                // Reset form fields
                 document.getElementById("visitDate").valueAsDate = new Date();
                 document.getElementById("customer").value = "";
                 document.getElementById("chargeable").value = "Yes";
@@ -384,7 +395,7 @@
             `).join("");
         }
 
-        // --- 8. RENDER STAGING TABLE (Status column removed, DD/MM/YYYY date) ---
+        // --- 8. RENDER STAGING TABLE ---
         function renderStagingTable() {
             const tbody = document.getElementById("stagingTableBody");
             if (stagingData.length === 0) {
