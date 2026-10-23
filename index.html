@@ -129,7 +129,7 @@
                     </div>
                 </div>
 
-                <!-- Staging Table (Status column removed) -->
+                <!-- Staging Table -->
                 <div class="overflow-x-auto border rounded-lg">
                     <table class="w-full text-left text-xs">
                         <thead class="bg-slate-800 text-white uppercase text-[10px] tracking-wider">
@@ -170,18 +170,17 @@
 
         document.getElementById('visitDate').valueAsDate = new Date();
 
-        // Helper function: Format date as DD/MM/YYYY for display
         function formatDateDisplay(dateStr) {
             if (!dateStr) return "";
             if (dateStr.includes("/")) return dateStr;
             const parts = dateStr.split("-");
             if (parts.length === 3) {
-                return `${parts[2]}/${parts[1]}/${parts[0]}`; // Convert YYYY-MM-DD to DD/MM/YYYY
+                return `${parts[2]}/${parts[1]}/${parts[0]}`;
             }
             return dateStr;
         }
 
-        // --- 3. GET OR REFRESH ACCESSTOKEN ---
+        // --- 3. GET ACCESSTOKEN WITH WRITE PERMISSIONS ---
         async function getAccessToken() {
             if (accessToken) return accessToken;
             const loginResponse = await msalInstance.loginPopup({
@@ -196,6 +195,8 @@
             const statusText = document.getElementById("syncStatusText");
             try {
                 statusText.innerText = "OneDrive: Connecting...";
+                // Request ReadWrite.All explicitly
+                accessToken = null;
                 const token = await getAccessToken();
                 const headers = { Authorization: `Bearer ${token}` };
 
@@ -233,7 +234,6 @@
                     }
                 }
 
-                // C. Load Existing VisitData Table
                 await fetchStagingFromOneDrive();
 
                 statusText.innerText = "OneDrive: Connected";
@@ -247,7 +247,7 @@
             }
         }
 
-        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE (VisitData) ---
+        // --- 5. FETCH STAGING ROWS FROM ONEDRIVE ---
         async function fetchStagingFromOneDrive() {
             try {
                 const token = await getAccessToken();
@@ -260,12 +260,13 @@
                 if (data.value) {
                     data.value.forEach(row => {
                         const v = row.values[0];
+                        // Handle 7-column schema [SyncStatus, VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
                         stagingData.push({
-                            visitDate: v[0] || "",
-                            customer: v[1] || "",
-                            chargeable: v[2] || "",
-                            product: v[3] || "",
-                            qty: v[4] || 0
+                            visitDate: v[1] || v[0] || "",
+                            customer: v[2] || v[1] || "",
+                            chargeable: v[3] || v[2] || "",
+                            product: v[4] || v[3] || "",
+                            qty: v[5] || v[4] || 0
                         });
                     });
                 }
@@ -275,7 +276,7 @@
             }
         }
 
-        // --- 6. SUBMIT SALESMAN ENTRY & POST TO ONEDRIVE (Without Status column) ---
+        // --- 6. SUBMIT SALESMAN ENTRY (Matches 7-column Excel Table) ---
         async function handleFormSubmit(e) {
             e.preventDefault();
             if (cartItems.length === 0) {
@@ -288,17 +289,19 @@
             submitBtn.innerText = "Saving to OneDrive...";
 
             const rawVisitDate = document.getElementById("visitDate").value;
-            const formattedDate = formatDateDisplay(rawVisitDate); // DD/MM/YYYY
+            const formattedDate = formatDateDisplay(rawVisitDate);
             const customer = document.getElementById("customer").value;
             const chargeable = document.getElementById("chargeable").value;
 
-            // Build payload rows without status column: [VisitDate, Customer, Chargeable, Product, Qty]
+            // Matches exact 7-column order: [SyncStatus, VisitDate, Customer, Chargeable, Product, Qty, MYOBUpdate]
             const rowsToInsert = cartItems.map(item => [
-                formattedDate, // VisitDate (DD/MM/YYYY)
-                customer,      // Customer
-                chargeable,    // Chargeable
-                item.product,  // Product
-                item.qty       // Qty
+                "",            // Column A: SyncStatus
+                formattedDate, // Column B: VisitDate
+                customer,      // Column C: Customer
+                chargeable,    // Column D: Chargeable
+                item.product,  // Column E: Product
+                item.qty,      // Column F: Qty
+                ""             // Column G: MYOBUpdate
             ]);
 
             try {
@@ -317,31 +320,32 @@
                 );
 
                 if (!response.ok) {
-                    throw new Error("Failed to write to OneDrive");
+                    const errRes = await response.json();
+                    console.error("Microsoft Graph Error Payload:", errRes);
+                    throw new Error("Failed to write to OneDrive: " + (errRes.error ? errRes.error.message : "Unknown error"));
                 }
 
                 alert("Visit entry saved directly to OneDrive App_Data.xlsx!");
 
-                // --- RESET FORM FIELDS ---
+                // Reset form
                 document.getElementById("visitDate").valueAsDate = new Date();
                 document.getElementById("customer").value = "";
                 document.getElementById("chargeable").value = "Yes";
                 cartItems = [];
                 renderCart();
 
-                // Refresh table display
                 await fetchStagingFromOneDrive();
 
             } catch (err) {
                 console.error("OneDrive Save Error:", err);
-                alert("Error saving to OneDrive. Please ensure you clicked 'Sync OneDrive Data'.");
+                alert("Error saving to OneDrive: " + err.message);
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i><span>Save Visit Entry to OneDrive</span>';
             }
         }
 
-        // --- 7. CART / LINE ITEM MANAGEMENT ---
+        // --- 7. CART MANAGEMENT ---
         function addLineItem() {
             const prod = document.getElementById("productSelect").value;
             const qty = document.getElementById("productQty").value;
@@ -379,7 +383,7 @@
             `).join("");
         }
 
-        // --- 8. RENDER STAGING TABLE (Status column removed, date formatted) ---
+        // --- 8. RENDER STAGING TABLE ---
         function renderStagingTable() {
             const tbody = document.getElementById("stagingTableBody");
             if (stagingData.length === 0) {
@@ -421,7 +425,7 @@
             renderStagingTable();
         }
 
-        // --- 10. ADMIN SYNC & CLEAR MASTER ---
+        // --- 10. ADMIN EXPORT ---
         function syncAndClearMaster() {
             if (stagingData.length === 0) {
                 alert("No records to export.");
