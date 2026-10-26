@@ -402,10 +402,50 @@
         }
 
         // --- 9. ROLE SWITCHING ---
-        function toggleRole() {
+        // Reads App_Data.xlsx -> AccessTable and returns the passwords of all rows where Role = Admin
+        async function fetchAdminPasswords() {
+            const token = await getAccessToken();
+            const res = await fetch(
+                "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('AccessTable')/range",
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            if (!res.ok) {
+                throw new Error("Could not read AccessTable from App_Data.xlsx (HTTP " + res.status + ")");
+            }
+            const values = (await res.json()).values || [];
+            const header = (values[0] || []).map(h => String(h).trim().toLowerCase());
+            const roleCol = header.indexOf("role");
+            const passCol = header.indexOf("password");
+            if (roleCol < 0 || passCol < 0) {
+                throw new Error("AccessTable needs 'Role' and 'Password' column headers.");
+            }
+            return values.slice(1)
+                .filter(r => String(r[roleCol]).trim().toLowerCase() === "admin")
+                .map(r => String(r[passCol]))
+                .filter(p => p !== "");
+        }
+
+        async function toggleRole() {
             if (currentRole === "salesman") {
-                const pwd = prompt("Enter Admin Password to switch (Default: admin123):");
-                if (pwd === "admin123") {
+                const toggleBtn = document.getElementById("toggleRoleBtn");
+                toggleBtn.disabled = true;
+                let adminPasswords;
+                try {
+                    adminPasswords = await fetchAdminPasswords();
+                } catch (err) {
+                    console.error("Admin password lookup error:", err);
+                    alert("Could not verify admin access: " + err.message);
+                    return;
+                } finally {
+                    toggleBtn.disabled = false;
+                }
+                if (adminPasswords.length === 0) {
+                    alert("No Admin password is set in AccessTable.");
+                    return;
+                }
+
+                const pwd = prompt("Enter Admin Password to switch:");
+                if (pwd !== null && adminPasswords.includes(pwd)) {
                     currentRole = "admin";
                     document.getElementById("roleBadge").className = "bg-purple-600 text-white font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
                     document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-gear mr-1"></i> Admin Mode';
@@ -418,7 +458,7 @@
                 currentRole = "salesman";
                 document.getElementById("roleBadge").className = "bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
                 document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode';
-                document.getElementById("toggleRoleBtn").innerText = "Switch to Salesman";
+                document.getElementById("toggleRoleBtn").innerText = "Switch to Admin";
                 document.getElementById("adminControls").classList.add("hidden");
             }
             renderStagingTable();
