@@ -134,11 +134,11 @@
                     <table class="w-full text-left text-xs">
                         <thead class="bg-slate-800 text-white uppercase text-[10px] tracking-wider">
                             <tr>
-                                <th class="p-2.5">Date</th>
-                                <th class="p-2.5">Customer</th>
-                                <th class="p-2.5">Chargeable</th>
-                                <th class="p-2.5">Product</th>
-                                <th class="p-2.5 text-center">Qty</th>
+                                <th class="p-2.5">DATE</th>
+                                <th class="p-2.5">CUSTOMER</th>
+                                <th class="p-2.5">CHARGEABLE</th>
+                                <th class="p-2.5">PRODUCT</th>
+                                <th class="p-2.5 text-center">QTY</th>
                             </tr>
                         </thead>
                         <tbody id="stagingTableBody" class="divide-y divide-slate-200">
@@ -262,12 +262,11 @@
                     data.value.forEach(row => {
                         const v = row.values[0];
                         stagingData.push({
-                            visitDate: v[0] || "",
-                            customer: v[1] || "",
-                            chargeable: v[2] || "",
-                            product: v[3] || "",
-                            qty: v[4] || 0,
-                            myob: v[5] || ""
+                            visitDate: formatDateDisplay(v[0]), // Index 0: VisitDate
+                            customer: v[1] || "",               // Index 1: Customer
+                            chargeable: v[2] || "",             // Index 2: Chargeable
+                            product: v[3] || "",                // Index 3: Product
+                            qty: v[4] || 0                      // Index 4: Qty (Index 5 MYOBUpdate is not displayed)
                         });
                     });
                 }
@@ -324,14 +323,14 @@
                     throw new Error("Failed to write to OneDrive: " + (errRes.error ? errRes.error.message : "Unknown error"));
                 }
 
-                alert("Visit entry saved directly to OneDrive App_Data.xlsx!");
-
-                // Reset form fields
+                // Reset form fields immediately on success (before the blocking alert)
                 document.getElementById("visitDate").valueAsDate = new Date();
                 document.getElementById("customer").value = "";
                 document.getElementById("chargeable").value = "Yes";
                 cartItems = [];
                 renderCart();
+
+                alert("Visit entry saved directly to OneDrive App_Data.xlsx!");
 
                 // Refresh Staging Table
                 await fetchStagingFromOneDrive();
@@ -393,7 +392,7 @@
 
             tbody.innerHTML = stagingData.map(row => `
                 <tr class="hover:bg-slate-50">
-                    <td class="p-2.5 font-medium">${formatDateDisplay(row.visitDate)}</td>
+                    <td class="p-2.5 font-medium">${row.visitDate}</td>
                     <td class="p-2.5">${row.customer}</td>
                     <td class="p-2.5">${row.chargeable}</td>
                     <td class="p-2.5 font-semibold text-indigo-900">${row.product}</td>
@@ -443,6 +442,9 @@
                     "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('VisitData')/rows",
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
+                if (!res.ok) {
+                    throw new Error("Could not read VisitData from App_Data.xlsx (HTTP " + res.status + ")");
+                }
                 const data = await res.json();
 
                 if (!data.value || data.value.length === 0) {
@@ -454,25 +456,30 @@
                 const rawRows = data.value.map(row => row.values[0]);
 
                 // Step 2: Post rows directly into MasterApp_Data.xlsx -> MasterData table
-                let masterRes = await fetch(
-                    "https://graph.microsoft.com/v1.0/me/drive/root:/MasterApp_Data.xlsx:/workbook/tables('MasterData')/rows/add",
-                    {
-                        method: "POST",
+                const masterBase = "https://graph.microsoft.com/v1.0/me/drive/root:/MasterApp_Data.xlsx:/workbook";
+                let masterRes = await fetch(`${masterBase}/tables('MasterData')/rows/add`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({ values: rawRows })
+                });
+
+                // Fallback only when no 'MasterData' Excel Table exists: append below the worksheet's usedRange
+                if (masterRes.status === 404) {
+                    const usedRes = await fetch(`${masterBase}/worksheets('MasterData')/usedRange(valuesOnly=true)`, { headers });
+                    if (!usedRes.ok) {
+                        throw new Error("Could not read worksheet 'MasterData' in MasterApp_Data.xlsx (HTTP " + usedRes.status + ")");
+                    }
+                    const used = await usedRes.json();
+                    const sheetIsEmpty = used.values.every(r => r.every(c => c === ""));
+                    const startRow = sheetIsEmpty ? used.rowIndex + 1 : used.rowIndex + used.rowCount + 1;
+                    const colName = n => { let s = ""; for (n += 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + (n - 1) % 26) + s; return s; };
+                    const address = `${colName(used.columnIndex)}${startRow}:${colName(used.columnIndex + rawRows[0].length - 1)}${startRow + rawRows.length - 1}`;
+
+                    masterRes = await fetch(`${masterBase}/worksheets('MasterData')/range(address='${address}')`, {
+                        method: "PATCH",
                         headers,
                         body: JSON.stringify({ values: rawRows })
-                    }
-                );
-
-                if (!masterRes.ok) {
-                    // Fallback to targeting worksheet 'MasterData' directly if MasterData isn't formatted as an Excel Table
-                    masterRes = await fetch(
-                        "https://graph.microsoft.com/v1.0/me/drive/root:/MasterApp_Data.xlsx:/workbook/worksheets('MasterData')/usedRange",
-                        {
-                            method: "PATCH",
-                            headers,
-                            body: JSON.stringify({ values: rawRows })
-                        }
-                    );
+                    });
                 }
 
                 if (!masterRes.ok) {
@@ -483,13 +490,17 @@
                 // Step 3: Delete rows from App_Data.xlsx -> VisitData table in reverse index order
                 const rowCount = data.value.length;
                 for (let i = rowCount - 1; i >= 0; i--) {
-                    await fetch(
+                    const delRes = await fetch(
                         `https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('VisitData')/rows/$/itemAt(index=${i})`,
                         {
                             method: "DELETE",
                             headers: { Authorization: `Bearer ${token}` }
                         }
                     );
+                    if (!delRes.ok) {
+                        await fetchStagingFromOneDrive();
+                        throw new Error(`Rows were copied to MasterApp_Data.xlsx, but clearing VisitData stopped at row ${i + 1} (HTTP ${delRes.status}). ${rowCount - 1 - i} of ${rowCount} rows were cleared. Remove the remaining rows manually before syncing again to avoid duplicates.`);
+                    }
                 }
 
                 alert(`Successfully transferred ${rowCount} records to MasterApp_Data.xlsx and cleared the VisitData table!`);
