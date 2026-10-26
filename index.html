@@ -139,6 +139,7 @@
                                 <th class="p-2.5">CHARGEABLE</th>
                                 <th class="p-2.5">PRODUCT</th>
                                 <th class="p-2.5 text-center">QTY</th>
+                                <th id="myobHeader" class="p-2.5 hidden">MYOBUPDATE</th>
                             </tr>
                         </thead>
                         <tbody id="stagingTableBody" class="divide-y divide-slate-200">
@@ -266,7 +267,8 @@
                             customer: v[1] || "",               // Index 1: Customer
                             chargeable: v[2] || "",             // Index 2: Chargeable
                             product: v[3] || "",                // Index 3: Product
-                            qty: v[4] || 0                      // Index 4: Qty (Index 5 MYOBUpdate is not displayed)
+                            qty: v[4] || 0,                     // Index 4: Qty
+                            myob: v[5] || ""                    // Index 5: MYOBUpdate (shown in Admin mode only)
                         });
                     });
                 }
@@ -385,8 +387,11 @@
         // --- 8. RENDER STAGING TABLE ---
         function renderStagingTable() {
             const tbody = document.getElementById("stagingTableBody");
+            const isAdmin = currentRole === "admin";
+            document.getElementById("myobHeader").classList.toggle("hidden", !isAdmin);
+
             if (stagingData.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400 italic">No entries in staging table</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="${isAdmin ? 6 : 5}" class="p-4 text-center text-slate-400 italic">No entries in staging table</td></tr>`;
                 return;
             }
 
@@ -397,6 +402,7 @@
                     <td class="p-2.5">${row.chargeable}</td>
                     <td class="p-2.5 font-semibold text-indigo-900">${row.product}</td>
                     <td class="p-2.5 text-center font-bold">${row.qty}</td>
+                    ${isAdmin ? `<td class="p-2.5">${row.myob}</td>` : ""}
                 </tr>
             `).join("");
         }
