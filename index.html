@@ -28,6 +28,9 @@
                 <span id="roleBadge" class="bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider">
                     <i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode
                 </span>
+                <button id="myobBtn" onclick="toggleMyobMode()" class="bg-teal-600 hover:bg-teal-500 text-white text-xs px-3 py-1.5 rounded transition font-medium border border-teal-400">
+                    MYOB Update
+                </button>
                 <button id="toggleRoleBtn" onclick="toggleRole()" class="bg-indigo-700 hover:bg-indigo-600 text-white text-xs px-3 py-1.5 rounded transition font-medium border border-indigo-500">
                     Switch to Admin
                 </button>
@@ -121,6 +124,13 @@
                         <p class="text-xs text-slate-500">Live entries in OneDrive VisitData sheet</p>
                     </div>
 
+                    <div id="dataEntryControls" class="hidden">
+                        <button id="myobUpdateBtn" onclick="updateMyobValues()" disabled class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-xs shadow transition flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-floppy-disk"></i>
+                            <span>Update</span>
+                        </button>
+                    </div>
+
                     <div id="adminControls" class="hidden">
                         <button id="adminSyncBtn" onclick="syncAndClearMaster()" class="bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-4 py-2 rounded-lg text-xs shadow transition flex items-center space-x-2">
                             <i class="fa-solid fa-cloud-arrow-up"></i>
@@ -168,6 +178,7 @@
         let currentRole = "salesman";
         let cartItems = [];
         let stagingData = [];
+        let pendingMyob = {}; // staging row index -> "Yes" | "No" chosen in MYOB Update mode, not yet saved
 
         document.getElementById('visitDate').valueAsDate = new Date();
 
@@ -259,6 +270,7 @@
                 );
                 const data = await res.json();
                 stagingData = [];
+                pendingMyob = {};
                 if (data.value) {
                     data.value.forEach(row => {
                         const v = row.values[0];
@@ -268,7 +280,8 @@
                             chargeable: v[2] || "",             // Index 2: Chargeable
                             product: v[3] || "",                // Index 3: Product
                             qty: v[4] || 0,                     // Index 4: Qty
-                            myob: v[5] || ""                    // Index 5: MYOBUpdate (shown in Admin mode only)
+                            myob: v[5] || "",                   // Index 5: MYOBUpdate (Admin / MYOB Update modes)
+                            raw: v                              // Original row values, used to verify rows before updating
                         });
                     });
                 }
@@ -387,29 +400,60 @@
         // --- 8. RENDER STAGING TABLE ---
         function renderStagingTable() {
             const tbody = document.getElementById("stagingTableBody");
-            const isAdmin = currentRole === "admin";
-            document.getElementById("myobHeader").classList.toggle("hidden", !isAdmin);
+            const showMyob = currentRole === "admin" || currentRole === "dataentry";
+            const canEditMyob = currentRole === "dataentry";
+            document.getElementById("myobHeader").classList.toggle("hidden", !showMyob);
 
             if (stagingData.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="${isAdmin ? 6 : 5}" class="p-4 text-center text-slate-400 italic">No entries in staging table</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="${showMyob ? 6 : 5}" class="p-4 text-center text-slate-400 italic">No entries in staging table</td></tr>`;
+                refreshMyobUpdateButton();
                 return;
             }
 
-            tbody.innerHTML = stagingData.map(row => `
+            tbody.innerHTML = stagingData.map((row, idx) => {
+                let myobCell = "";
+                if (canEditMyob) {
+                    const selected = pendingMyob[idx] !== undefined ? pendingMyob[idx] : row.myob;
+                    myobCell = `<td class="p-2.5">
+                        <select onchange="onMyobChange(${idx}, this.value)" class="border border-slate-300 rounded px-2 py-1 text-xs focus:ring-2 focus:ring-teal-500 focus:outline-none">
+                            ${selected !== "Yes" && selected !== "No" ? '<option value="" selected>-- Select --</option>' : ""}
+                            <option value="Yes"${selected === "Yes" ? " selected" : ""}>Yes</option>
+                            <option value="No"${selected === "No" ? " selected" : ""}>No</option>
+                        </select>
+                    </td>`;
+                } else if (showMyob) {
+                    myobCell = `<td class="p-2.5">${row.myob}</td>`;
+                }
+                return `
                 <tr class="hover:bg-slate-50">
                     <td class="p-2.5 font-medium">${row.visitDate}</td>
                     <td class="p-2.5">${row.customer}</td>
                     <td class="p-2.5">${row.chargeable}</td>
                     <td class="p-2.5 font-semibold text-indigo-900">${row.product}</td>
                     <td class="p-2.5 text-center font-bold">${row.qty}</td>
-                    ${isAdmin ? `<td class="p-2.5">${row.myob}</td>` : ""}
-                </tr>
-            `).join("");
+                    ${myobCell}
+                </tr>`;
+            }).join("");
+            refreshMyobUpdateButton();
+        }
+
+        // Tracks Yes/No choices made in the MYOBUpdate column (MYOB Update mode) until "Update" is clicked
+        function onMyobChange(idx, value) {
+            if (value === "" || value === stagingData[idx].myob) {
+                delete pendingMyob[idx];
+            } else {
+                pendingMyob[idx] = value;
+            }
+            refreshMyobUpdateButton();
+        }
+
+        function refreshMyobUpdateButton() {
+            document.getElementById("myobUpdateBtn").disabled = Object.keys(pendingMyob).length === 0;
         }
 
         // --- 9. ROLE SWITCHING ---
-        // Reads App_Data.xlsx -> AccessTable and returns the passwords of all rows where Role = Admin
-        async function fetchAdminPasswords() {
+        // Reads App_Data.xlsx -> AccessTable and returns the passwords of all rows matching the given Role ("Admin" or "DataEntry")
+        async function fetchRolePasswords(role) {
             const token = await getAccessToken();
             const res = await fetch(
                 "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('AccessTable')/range",
@@ -426,48 +470,133 @@
                 throw new Error("AccessTable needs 'Role' and 'Password' column headers.");
             }
             return values.slice(1)
-                .filter(r => String(r[roleCol]).trim().toLowerCase() === "admin")
+                .filter(r => String(r[roleCol]).trim().toLowerCase() === role.toLowerCase())
                 .map(r => String(r[passCol]))
                 .filter(p => p !== "");
         }
 
+        // Verifies the user against AccessTable (Role = sheetRole) with a password prompt; returns true when allowed
+        async function authenticateRole(sheetRole, label) {
+            const buttons = [document.getElementById("toggleRoleBtn"), document.getElementById("myobBtn")];
+            buttons.forEach(b => b.disabled = true);
+            let passwords;
+            try {
+                passwords = await fetchRolePasswords(sheetRole);
+            } catch (err) {
+                console.error(`${label} password lookup error:`, err);
+                alert(`Could not verify ${label} access: ` + err.message);
+                return false;
+            } finally {
+                buttons.forEach(b => b.disabled = false);
+            }
+            if (passwords.length === 0) {
+                alert(`No ${label} password is set in AccessTable.`);
+                return false;
+            }
+
+            const pwd = prompt(`Enter ${label} Password to switch:`);
+            if (pwd === null) return false;
+            if (!passwords.includes(pwd)) {
+                alert("Incorrect Password!");
+                return false;
+            }
+            return true;
+        }
+
+        // Applies the UI for a role: "salesman", "admin" or "dataentry" (MYOB Update mode)
+        function setRole(role) {
+            currentRole = role;
+            pendingMyob = {};
+            const badge = document.getElementById("roleBadge");
+            const toggleBtn = document.getElementById("toggleRoleBtn");
+            const myobBtn = document.getElementById("myobBtn");
+
+            if (role === "admin") {
+                badge.className = "bg-purple-600 text-white font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
+                badge.innerHTML = '<i class="fa-solid fa-user-gear mr-1"></i> Admin Mode';
+            } else if (role === "dataentry") {
+                badge.className = "bg-teal-600 text-white font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
+                badge.innerHTML = '<i class="fa-solid fa-keyboard mr-1"></i> MYOB Update Mode';
+            } else {
+                badge.className = "bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
+                badge.innerHTML = '<i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode';
+            }
+
+            toggleBtn.innerText = role === "admin" ? "Switch to Salesman" : "Switch to Admin";
+            myobBtn.innerText = role === "dataentry" ? "Exit MYOB Update" : "MYOB Update";
+            document.getElementById("adminControls").classList.toggle("hidden", role !== "admin");
+            document.getElementById("dataEntryControls").classList.toggle("hidden", role !== "dataentry");
+            renderStagingTable();
+        }
+
         async function toggleRole() {
-            if (currentRole === "salesman") {
-                const toggleBtn = document.getElementById("toggleRoleBtn");
-                toggleBtn.disabled = true;
-                let adminPasswords;
-                try {
-                    adminPasswords = await fetchAdminPasswords();
-                } catch (err) {
-                    console.error("Admin password lookup error:", err);
-                    alert("Could not verify admin access: " + err.message);
-                    return;
-                } finally {
-                    toggleBtn.disabled = false;
+            if (currentRole === "admin") {
+                setRole("salesman");
+            } else if (await authenticateRole("Admin", "Admin")) {
+                setRole("admin");
+            }
+        }
+
+        async function toggleMyobMode() {
+            if (currentRole === "dataentry") {
+                setRole("salesman");
+            } else if (await authenticateRole("DataEntry", "Data Entry")) {
+                setRole("dataentry");
+            }
+        }
+
+        // --- 9b. SAVE MYOBUPDATE VALUES (MYOB Update mode) ---
+        async function updateMyobValues() {
+            const changes = Object.entries(pendingMyob).map(([i, value]) => [Number(i), value]);
+            if (changes.length === 0) return;
+
+            const btn = document.getElementById("myobUpdateBtn");
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Updating...</span>';
+
+            try {
+                const token = await getAccessToken();
+                const base = "https://graph.microsoft.com/v1.0/me/drive/root:/App_Data.xlsx:/workbook/tables('VisitData')/rows";
+
+                // Re-read the live rows and make sure each row to update is still the one shown on screen
+                const res = await fetch(base, { headers: { Authorization: `Bearer ${token}` } });
+                if (!res.ok) {
+                    throw new Error("Could not read VisitData from App_Data.xlsx (HTTP " + res.status + ")");
                 }
-                if (adminPasswords.length === 0) {
-                    alert("No Admin password is set in AccessTable.");
-                    return;
+                const liveRows = (await res.json()).value || [];
+                for (const [i] of changes) {
+                    const live = liveRows[i] && liveRows[i].values[0];
+                    if (!live || JSON.stringify(live.slice(0, 5)) !== JSON.stringify(stagingData[i].raw.slice(0, 5))) {
+                        await fetchStagingFromOneDrive();
+                        throw new Error("VisitData changed since it was loaded. The table was refreshed - please choose the values again.");
+                    }
                 }
 
-                const pwd = prompt("Enter Admin Password to switch:");
-                if (pwd !== null && adminPasswords.includes(pwd)) {
-                    currentRole = "admin";
-                    document.getElementById("roleBadge").className = "bg-purple-600 text-white font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
-                    document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-gear mr-1"></i> Admin Mode';
-                    document.getElementById("toggleRoleBtn").innerText = "Switch to Salesman";
-                    document.getElementById("adminControls").classList.remove("hidden");
-                } else if (pwd !== null) {
-                    alert("Incorrect Password!");
+                let saved = 0;
+                for (const [i, value] of changes) {
+                    const rowValues = [...liveRows[i].values[0]];
+                    rowValues[5] = value; // Index 5: MYOBUpdate
+                    const patchRes = await fetch(`${base}/itemAt(index=${i})`, {
+                        method: "PATCH",
+                        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                        body: JSON.stringify({ values: [rowValues] })
+                    });
+                    if (!patchRes.ok) {
+                        await fetchStagingFromOneDrive();
+                        throw new Error(`Saved ${saved} of ${changes.length} rows; saving row ${i + 1} failed (HTTP ${patchRes.status}).`);
+                    }
+                    saved++;
                 }
-            } else {
-                currentRole = "salesman";
-                document.getElementById("roleBadge").className = "bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
-                document.getElementById("roleBadge").innerHTML = '<i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode';
-                document.getElementById("toggleRoleBtn").innerText = "Switch to Admin";
-                document.getElementById("adminControls").classList.add("hidden");
+
+                alert(`MYOBUpdate saved for ${saved} row(s).`);
+                await fetchStagingFromOneDrive();
+            } catch (err) {
+                console.error("MYOB Update Error:", err);
+                alert("Error updating MYOBUpdate: " + err.message);
+            } finally {
+                btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i><span>Update</span>';
+                refreshMyobUpdateButton();
             }
-            renderStagingTable();
         }
 
         // --- 10. ADMIN SYNC & DIRECT TRANSFER TO MASTERAPP_DATA.XLSX ---
