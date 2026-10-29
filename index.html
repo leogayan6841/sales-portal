@@ -161,6 +161,18 @@
         </div>
     </main>
 
+    <!-- Password dialog (masked input; replaces the browser prompt) -->
+    <div id="pwdModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center px-4">
+        <form id="pwdForm" class="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <h3 id="pwdTitle" class="text-base font-bold text-slate-900"></h3>
+            <input type="password" id="pwdInput" autocomplete="off" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="Password">
+            <div class="flex justify-end space-x-2">
+                <button type="button" id="pwdCancel" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition">Cancel</button>
+                <button type="submit" class="px-4 py-2 rounded-lg text-xs font-bold bg-indigo-700 hover:bg-indigo-600 text-white transition">OK</button>
+            </div>
+        </form>
+    </div>
+
     <script>
         // --- 1. MSAL CONFIGURATION ---
         const msalConfig = {
@@ -475,7 +487,36 @@
                 .filter(p => p !== "");
         }
 
-        // Verifies the user against AccessTable (Role = sheetRole) with a password prompt; returns true when allowed
+        // Shows the masked password dialog; resolves with the typed password, or null if cancelled
+        function askPassword(title) {
+            return new Promise(resolve => {
+                const modal = document.getElementById("pwdModal");
+                const form = document.getElementById("pwdForm");
+                const input = document.getElementById("pwdInput");
+                document.getElementById("pwdTitle").innerText = title;
+                input.value = "";
+                modal.classList.remove("hidden");
+                input.focus();
+
+                const finish = value => {
+                    modal.classList.add("hidden");
+                    input.value = "";
+                    form.removeEventListener("submit", onSubmit);
+                    document.getElementById("pwdCancel").removeEventListener("click", onCancel);
+                    document.removeEventListener("keydown", onKey);
+                    resolve(value);
+                };
+                const onSubmit = e => { e.preventDefault(); finish(input.value); };
+                const onCancel = () => finish(null);
+                const onKey = e => { if (e.key === "Escape") finish(null); };
+
+                form.addEventListener("submit", onSubmit);
+                document.getElementById("pwdCancel").addEventListener("click", onCancel);
+                document.addEventListener("keydown", onKey);
+            });
+        }
+
+        // Verifies the user against AccessTable (Role = sheetRole) with a masked password dialog; returns true when allowed
         async function authenticateRole(sheetRole, label) {
             const buttons = [document.getElementById("toggleRoleBtn"), document.getElementById("myobBtn")];
             buttons.forEach(b => b.disabled = true);
@@ -494,7 +535,7 @@
                 return false;
             }
 
-            const pwd = prompt(`Enter ${label} Password to switch:`);
+            const pwd = await askPassword(`Enter ${label} Password`);
             if (pwd === null) return false;
             if (!passwords.includes(pwd)) {
                 alert("Incorrect Password!");
