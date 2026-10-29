@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RPS- Sales & Master Portal</title>
+    <title>Ringwood Property Services Inventory Movement</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -18,7 +18,7 @@
         <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
             <div class="flex items-center space-x-3">
                 <i class="fa-solid fa-boxes-packing text-2xl text-amber-400"></i>
-                <h1 class="text-xl font-bold tracking-wide">RPS- Sales & Master Portal</h1>
+                <h1 class="text-xl font-bold tracking-wide">Ringwood Property Services Inventory Movement</h1>
             </div>
             <div class="flex items-center space-x-3">
                 <button onclick="fetchOneDriveLists()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-1.5 rounded transition font-medium flex items-center space-x-1">
@@ -26,7 +26,7 @@
                     <span>Login To Microsoft</span>
                 </button>
                 <span id="roleBadge" class="bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider">
-                    <i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode
+                    <i class="fa-solid fa-user-tie mr-1"></i> Inventory update mode
                 </span>
                 <button id="myobBtn" onclick="toggleMyobMode()" class="bg-teal-600 hover:bg-teal-500 text-white text-xs px-3 py-1.5 rounded transition font-medium border border-teal-400">
                     MYOB Update
@@ -57,9 +57,8 @@
                 <!-- Customer Selection -->
                 <div>
                     <label class="block text-xs font-semibold uppercase text-slate-600 mb-1">Customer Name</label>
-                    <select id="customer" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-                        <option value="">-- Click 'Login To Microsoft' to Load --</option>
-                    </select>
+                    <input type="text" id="customer" list="customerList" required autocomplete="off" placeholder="Click 'Login To Microsoft' to load customers" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <datalist id="customerList"></datalist>
                 </div>
 
                 <!-- Chargeable -->
@@ -76,9 +75,8 @@
                     <label class="block text-xs font-bold uppercase text-indigo-900">Add Products to Visit</label>
                     <div class="grid grid-cols-12 gap-2">
                         <div class="col-span-7">
-                            <select id="productSelect" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
-                                <option value="">-- Select Product --</option>
-                            </select>
+                            <input type="text" id="productSelect" list="productList" autocomplete="off" placeholder="Search product" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                            <datalist id="productList"></datalist>
                         </div>
                         <div class="col-span-3">
                             <input type="number" id="productQty" min="1" placeholder="Qty" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
@@ -215,6 +213,33 @@
             return accessToken;
         }
 
+        // --- 3b. SEARCHABLE CUSTOMER / PRODUCT FIELDS ---
+        const searchLists = { customerList: [], productList: [] }; // valid names loaded from OneDrive
+
+        // Fills a <datalist> from the first column of a worksheet range (row 0 is the header)
+        function fillSearchList(listId, inputId, placeholder, rangeValues) {
+            const datalist = document.getElementById(listId);
+            datalist.replaceChildren();
+            const names = [];
+            (rangeValues || []).slice(1).forEach(row => {
+                const name = String(row[0] || "").trim();
+                if (name) {
+                    names.push(name);
+                    const opt = document.createElement("option");
+                    opt.value = name;
+                    datalist.appendChild(opt);
+                }
+            });
+            searchLists[listId] = names;
+            document.getElementById(inputId).placeholder = placeholder;
+        }
+
+        // Returns the exact list name matching what was typed (case-insensitive), or null if it is not in the list
+        function matchListName(listId, typed) {
+            const t = String(typed || "").trim().toLowerCase();
+            return searchLists[listId].find(n => n.toLowerCase() === t) || null;
+        }
+
         // --- 4. FETCH CUSTOMERS & PRODUCTS FROM ONEDRIVE ---
         async function fetchOneDriveLists() {
             const statusText = document.getElementById("syncStatusText");
@@ -230,16 +255,7 @@
                     { headers }
                 );
                 const custData = await custRes.json();
-                const custSelect = document.getElementById("customer");
-                custSelect.innerHTML = '<option value="">-- Select Customer --</option>';
-                if (custData.values && custData.values.length > 1) {
-                    for (let i = 1; i < custData.values.length; i++) {
-                        const customerName = custData.values[i][0];
-                        if (customerName) {
-                            custSelect.innerHTML += `<option value="${customerName}">${customerName}</option>`;
-                        }
-                    }
-                }
+                fillSearchList("customerList", "customer", "Type to search customer", custData.values);
 
                 // B. Fetch Product Names
                 const prodRes = await fetch(
@@ -247,16 +263,7 @@
                     { headers }
                 );
                 const prodData = await prodRes.json();
-                const prodSelect = document.getElementById("productSelect");
-                prodSelect.innerHTML = '<option value="">-- Select Product --</option>';
-                if (prodData.values && prodData.values.length > 1) {
-                    for (let i = 1; i < prodData.values.length; i++) {
-                        const productName = prodData.values[i][0];
-                        if (productName) {
-                            prodSelect.innerHTML += `<option value="${productName}">${productName}</option>`;
-                        }
-                    }
-                }
+                fillSearchList("productList", "productSelect", "Type to search product", prodData.values);
 
                 // C. Load Existing VisitData Table
                 await fetchStagingFromOneDrive();
@@ -311,13 +318,18 @@
                 return;
             }
 
+            const customer = matchListName("customerList", document.getElementById("customer").value);
+            if (!customer) {
+                alert("Please choose a customer from the list. Click 'Login To Microsoft' first if the list is empty.");
+                return;
+            }
+
             const submitBtn = document.getElementById("submitBtn");
             submitBtn.disabled = true;
             submitBtn.innerText = "Saving to OneDrive...";
 
             const rawVisitDate = document.getElementById("visitDate").value;
             const formattedDate = formatDateDisplay(rawVisitDate);
-            const customer = document.getElementById("customer").value;
             const chargeable = document.getElementById("chargeable").value;
 
             const rowsToInsert = cartItems.map(item => [
@@ -373,11 +385,15 @@
 
         // --- 7. CART MANAGEMENT ---
         function addLineItem() {
-            const prod = document.getElementById("productSelect").value;
+            const prod = matchListName("productList", document.getElementById("productSelect").value);
             const qty = document.getElementById("productQty").value;
 
-            if (!prod || !qty || qty <= 0) {
-                alert("Please select a product and enter a valid quantity.");
+            if (!prod) {
+                alert("Please choose a product from the list. Click 'Login To Microsoft' first if the list is empty.");
+                return;
+            }
+            if (!qty || qty <= 0) {
+                alert("Please enter a valid quantity.");
                 return;
             }
 
@@ -560,10 +576,10 @@
                 badge.innerHTML = '<i class="fa-solid fa-keyboard mr-1"></i> MYOB Update Mode';
             } else {
                 badge.className = "bg-amber-500 text-slate-900 font-semibold px-3 py-1 rounded-full text-xs uppercase tracking-wider";
-                badge.innerHTML = '<i class="fa-solid fa-user-tie mr-1"></i> Salesman Mode';
+                badge.innerHTML = '<i class="fa-solid fa-user-tie mr-1"></i> Inventory update mode';
             }
 
-            toggleBtn.innerText = role === "admin" ? "Switch to Salesman" : "Switch to Admin";
+            toggleBtn.innerText = role === "admin" ? "Switch to Inventory Update" : "Switch to Admin";
             myobBtn.innerText = role === "dataentry" ? "Exit MYOB Update" : "MYOB Update";
             document.getElementById("adminControls").classList.toggle("hidden", role !== "admin");
             document.getElementById("dataEntryControls").classList.toggle("hidden", role !== "dataentry");
